@@ -138,6 +138,31 @@ void intersect_helper(vector<int>& h_intersectTriangle,
         }
     }  
 
+void ray_generation_helper(vector<float>& h_rayFrom, vector<float>& h_rayTo, int& nRays){
+    // h_rayFrom = {0.0, 0.0, -0.4, 10.0, 0.0, 0.0};
+    // h_rayTo = {0.0, 0.0, 5.0, 10.0, 0.0, 10.0};
+    // nRays = 2;
+
+    //a dummy ray generation of SCM grid 1m x 0.5 m, centered at 0, with mesh resolution 0.01.
+    float x_dim = 2.0; float y_dim = 1.0;
+    float x_c = 0.0; float y_c = 0.0;
+    float resolution = 0.01;
+    int n_x = int(x_dim / resolution)+1;
+    int n_y = int(y_dim / resolution)+1;
+    nRays = n_x * n_y;
+
+    for(int i = 0; i < n_x; i++){
+        for(int j = 0; j < n_y; j++){
+            h_rayFrom.push_back(x_c - x_dim/2 + i*resolution);
+            h_rayFrom.push_back(y_c - y_dim/2 + j*resolution);
+            h_rayFrom.push_back(-0.4);
+            h_rayTo.push_back(x_c - x_dim/2 + i*resolution);
+            h_rayTo.push_back(y_c - y_dim/2 + j*resolution);
+            h_rayTo.push_back(5.0);
+        }
+    }
+}
+
 // ======================================================================
 
 int main(int argc, char* argv[]) {
@@ -191,9 +216,8 @@ int main(int argc, char* argv[]) {
     //int nRaysTo = readData(fileTo, h_rayTo, 3, quietMode);
     //assert(nRaysTo == nRays);
 
-    h_rayFrom = {0.0, 0.0, -0.4, 10.0, 0.0, 0.0};
-    h_rayTo = {0.0, 0.0, 5.0, 10.0, 0.0, 10.0};
-    nRays = 2;
+    ray_generation_helper(h_rayFrom, h_rayTo, nRays);
+    std::cout << "nRays: " << nRays << std::endl;
 
     h_crossingDetected.resize(nRays);
 
@@ -337,9 +361,12 @@ int main(int argc, char* argv[]) {
     // sanity check
     vector<int>& outcome = !barycentric ? h_crossingDetected : h_intersectTriangle;
     if (!quietMode) {
-        cout << "Results for last few elements:" << endl;
-        for (int i = nRays - min(20, nRays); i < nRays; i++) {
-            cout << i << ": " << outcome[i] << "," << p_intersect[3*i] << "," << p_intersect[3*i+1] << "," << p_intersect[3*i+2] << endl;
+        cout << "Results for all intersection elements:" << endl;
+        for (int i = 0; i < nRays; i++) {
+            if(outcome[i] != -1){
+                cout << i << ": " << outcome[i] << "," << p_intersect[3*i] << "," << p_intersect[3*i+1] << "," << p_intersect[3*i+2] << endl;
+            }
+
         }
         cout << "Processing time: ";
         cout << time << " ms" << endl;
