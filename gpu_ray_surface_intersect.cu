@@ -17,6 +17,8 @@
 #include <stdint.h>
 #include "bvh_structure.h"
 #include "rsi_geometry.h"
+#include "ray_tracing.cuh"
+
 
 using namespace std;
 using namespace lib_bvh;
@@ -83,37 +85,7 @@ void writeData(string fname, vector<T>& v) {
     outfile.close();
 }
 
-// =================== JSON added helper function =======================
-void readMeshData(string fname, vector<float>& v, vector<int>& surf) {
-    std::ifstream file(fname);
-    std::string line;
 
-    while (std::getline(file, line)) {
-        std::istringstream iss(line);
-        std::string prefix;
-        iss >> prefix;
-
-        if (prefix == "v") {
-            float x,y,z;
-            iss >> x >> y >> z;
-            v.push_back(x);
-            v.push_back(y);
-            v.push_back(z);
-        } else if (prefix == "f") {
-            std::string vertex;
-            for (int i = 0; i < 3; ++i) {
-                iss >> vertex;
-                size_t slash_pos = vertex.find('/');
-                if (slash_pos != std::string::npos) {
-                    vertex = vertex.substr(0, slash_pos);
-                }
-                int idx = std::stoi(vertex) - 1;
-                surf.push_back(idx);
-            }
-        }
-    }
-
-}
 
 // ======================================================================
 // this helper converts intersection points from Baycentric coordinates to Cartesian coordinates
@@ -138,40 +110,11 @@ void intersect_helper(vector<int>& h_intersectTriangle,
         }
     }  
 
-void ray_generation_helper(vector<float>& h_rayFrom, vector<float>& h_rayTo, int& nRays){
-    // h_rayFrom = {0.0, 0.0, -0.4, 10.0, 0.0, 0.0};
-    // h_rayTo = {0.0, 0.0, 5.0, 10.0, 0.0, 10.0};
-    // nRays = 2;
-
-    //a dummy ray generation of SCM grid 1m x 0.5 m, centered at 0, with mesh resolution 0.01.
-    float x_dim = 2.0; float y_dim = 1.0;
-    float x_c = 0.0; float y_c = 0.0;
-    float resolution = 0.01;
-    int n_x = int(x_dim / resolution)+1;
-    int n_y = int(y_dim / resolution)+1;
-    nRays = n_x * n_y;
-
-    for(int i = 0; i < n_x; i++){
-        for(int j = 0; j < n_y; j++){
-            h_rayFrom.push_back(x_c - x_dim/2 + i*resolution);
-            h_rayFrom.push_back(y_c - y_dim/2 + j*resolution);
-            h_rayFrom.push_back(-0.4);
-            h_rayTo.push_back(x_c - x_dim/2 + i*resolution);
-            h_rayTo.push_back(y_c - y_dim/2 + j*resolution);
-            h_rayTo.push_back(5.0);
-        }
-    }
-}
-
 // ======================================================================
 
-int main(int argc, char* argv[]) {
+void gpu_trace_ray(vector<float> h_vertices, vector<int> h_triangles, vector<float> h_rayFrom, vector<float> h_rayTo, vector<int>& valid_outcome_idx, vector<float>& valid_outcome) {
     const bool checkEnabled(true);
     const float largePosVal(2.5e+8);
-    vector<float> h_vertices;
-    vector<int> h_triangles;
-    vector<float> h_rayFrom;
-    vector<float> h_rayTo;
     vector<int> h_crossingDetected;
     vector<int> h_intersectTriangle;
     vector<float> h_baryT, h_baryU, h_baryV;
@@ -192,10 +135,9 @@ int main(int argc, char* argv[]) {
       |  (1-u-v)*V[0] + u*V[1] + v*V[2], V[i] = vertices[triangles[f][i]].
     */
     bool barycentric = true;
-    bool interceptsCount(argc > 6 ? strcmp(argv[6], "intercept_count") == 0 : false);
+    bool interceptsCount = false;
 
     // read input data into host memory
-    readMeshData("cobra_wheel.obj", h_vertices, h_triangles);
     nVertices = h_vertices.size() / 3;
     nTriangles = h_triangles.size() / 3;
     cout << "v size:"<< nVertices << " t size:" << nTriangles << endl;
@@ -216,8 +158,8 @@ int main(int argc, char* argv[]) {
     //int nRaysTo = readData(fileTo, h_rayTo, 3, quietMode);
     //assert(nRaysTo == nRays);
 
-    ray_generation_helper(h_rayFrom, h_rayTo, nRays);
-    std::cout << "nRays: " << nRays << std::endl;
+    nRays = h_rayFrom.size()/3;
+    std::cout << "nRays: " << nRays<< std::endl;
 
     h_crossingDetected.resize(nRays);
 
@@ -360,15 +302,45 @@ int main(int argc, char* argv[]) {
 
     // sanity check
     vector<int>& outcome = !barycentric ? h_crossingDetected : h_intersectTriangle;
+    valid_outcome_idx.clear();
+    valid_outcome.clear();
     if (!quietMode) {
         cout << "Results for all intersection elements:" << endl;
         for (int i = 0; i < nRays; i++) {
             if(outcome[i] != -1){
-                cout << i << ": " << outcome[i] << "," << p_intersect[3*i] << "," << p_intersect[3*i+1] << "," << p_intersect[3*i+2] << endl;
+                valid_outcome_idx.push_back(i);
+                valid_outcome.push_back(p_intersect[3*i]);
+                valid_outcome.push_back(p_intersect[3*i+1]);
+                valid_outcome.push_back(p_intersect[3*i+2]);
+                //cout << i << ": " << outcome[i] << "," << p_intersect[3*i] << "," << p_intersect[3*i+1] << "," << p_intersect[3*i+2] << endl;
             }
 
         }
+        cout << "number of valid entry:" << valid_outcome_idx.size() << endl;
         cout << "Processing time: ";
         cout << time << " ms" << endl;
     }
+
+    cudaFree(d_vertices);
+    cudaFree(d_triangles);
+    cudaFree(d_rayFrom);
+    cudaFree(d_rayTo);
+    cudaFree(d_rayBox);
+    if (!barycentric) {
+        cudaFree(d_crossingDetected);
+    } else {
+        cudaFree(d_intersectTriangle);
+        cudaFree(d_baryT);
+        cudaFree(d_baryU);
+        cudaFree(d_baryV);
+    }
+    cudaFree(d_leafNodes);
+    cudaFree(d_internalNodes);
+    cudaFree(d_morton);
+    cudaFree(d_sortedTriangleIDs);
+    cudaFree(d_hitIDs);
+    if (interceptsCount) {
+        cudaFree(d_interceptDists);
+    }
+    cudaEventDestroy(start);
 }
