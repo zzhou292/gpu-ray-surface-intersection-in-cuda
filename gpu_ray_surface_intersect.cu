@@ -18,7 +18,7 @@
 #include "bvh_structure.h"
 #include "rsi_geometry.h"
 #include "ray_tracing.cuh"
-
+#include "scm_kernels.h"
 
 using namespace std;
 using namespace lib_bvh;
@@ -111,7 +111,6 @@ void intersect_helper(vector<int>& h_intersectTriangle,
     }  
 
 // ======================================================================
-
 void gpu_trace_ray(vector<float> h_vertices, vector<int> h_triangles, vector<float> h_rayFrom, vector<float> h_rayTo, vector<int>& valid_outcome_idx, vector<float>& valid_outcome) {
     const bool checkEnabled(true);
     const float largePosVal(2.5e+8);
@@ -286,19 +285,34 @@ void gpu_trace_ray(vector<float> h_vertices, vector<int> h_triangles, vector<flo
         HANDLE_ERROR(cudaMemcpy(h_crossingDetected.data(), d_crossingDetected, sz_id, cudaMemcpyDeviceToHost));
         writeData("results_i32", h_crossingDetected);
     } else {
-        HANDLE_ERROR(cudaMemcpy(h_intersectTriangle.data(), d_intersectTriangle, sz_id, cudaMemcpyDeviceToHost));
-        HANDLE_ERROR(cudaMemcpy(h_baryT.data(), d_baryT, sz_bary, cudaMemcpyDeviceToHost));
-        HANDLE_ERROR(cudaMemcpy(h_baryU.data(), d_baryU, sz_bary, cudaMemcpyDeviceToHost));
-        HANDLE_ERROR(cudaMemcpy(h_baryV.data(), d_baryV, sz_bary, cudaMemcpyDeviceToHost));
-        writeData("intersectTriangle_i32", h_intersectTriangle);
-        writeData("barycentricT_f32", h_baryT);
-        writeData("barycentricU_f32", h_baryU);
-        writeData("barycentricV_f32", h_baryV);
+        HANDLE_ERROR(cudaMemcpy(h_intersectTriangle.data(), d_intersectTriangle, sz_id,cudaMemcpyDeviceToHost));
+       // HANDLE_ERROR(cudaMemcpy(h_baryT.data(), d_baryT, sz_bary, cudaMemcpyDeviceToHost));
+       // HANDLE_ERROR(cudaMemcpy(h_baryU.data(), d_baryU, sz_bary, cudaMemcpyDeviceToHost));
+       // HANDLE_ERROR(cudaMemcpy(h_baryV.data(), d_baryV, sz_bary, cudaMemcpyDeviceToHost));
+       // writeData("intersectTriangle_i32", h_intersectTriangle);
+       // writeData("barycentricT_f32", h_baryT);
+       // writeData("barycentricU_f32", h_baryU);
+       // writeData("barycentricV_f32", h_baryV);
     }
 
     vector<float> p_intersect(nRays * 3, -1.0);
     // calculate the intersection point based on the barycentric coordinates
-    intersect_helper(h_intersectTriangle,h_baryT, h_baryU, h_baryV, nVertices, nTriangles, nRays, h_vertices, h_triangles, p_intersect);
+    // intersect_helper(h_intersectTriangle,h_baryT, h_baryU, h_baryV, nVertices, nTriangles, nRays, h_vertices, h_triangles, p_intersect);
+    // Device pointer for p_intersect
+    float* d_intersect = nullptr;
+    int sz_intersect(nRays * 3 * sizeof(float));
+    HANDLE_ERROR(cudaMalloc((void**)&d_intersect, sz_intersect));
+    HANDLE_ERROR(cudaMemset(d_intersect, -1, sz_intersect));
+  
+
+    intersect_helper_cuda<<<gridXr, blockX>>>(d_intersectTriangle, d_baryT,
+                                      d_baryU, d_baryV,
+                                      d_vertices, d_triangles,
+                                      d_intersect, nRays);
+    HANDLE_ERROR(cudaDeviceSynchronize());
+
+
+    HANDLE_ERROR(cudaMemcpy(p_intersect.data(), d_intersect, sz_intersect, cudaMemcpyDeviceToHost));
 
     // sanity check
     vector<int>& outcome = !barycentric ? h_crossingDetected : h_intersectTriangle;
@@ -339,6 +353,7 @@ void gpu_trace_ray(vector<float> h_vertices, vector<int> h_triangles, vector<flo
     cudaFree(d_morton);
     cudaFree(d_sortedTriangleIDs);
     cudaFree(d_hitIDs);
+    cudaFree(d_intersect);
     if (interceptsCount) {
         cudaFree(d_interceptDists);
     }

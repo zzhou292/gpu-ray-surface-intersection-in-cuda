@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <iomanip> // For std::fixed and std::setprecision
 #include "ray_tracing.cuh"
+
 using namespace std;
 
 
@@ -144,12 +145,14 @@ void writeVTKFile(const std::string& filename, const std::vector<float>& vertice
 }
 
 
+
+
 int main() {
 
     std::filesystem::create_directories("output");
 
     // Define the range and resolution
-    float start = -5.0f, end = 5.0f, resolution = 0.005f;
+    float start = -5.0f, end = 5.0f, resolution = 0.01f;
     int size = static_cast<int>((end - start) / resolution);
 
     vector<float> h_rayFrom;
@@ -163,7 +166,7 @@ int main() {
             float y = start + j * resolution;
             h_rayFrom.push_back(x);
             h_rayFrom.push_back(y);
-            h_rayFrom.push_back(-0.12);
+            h_rayFrom.push_back(-0.45);
             h_rayTo.push_back(x);
             h_rayTo.push_back(y);
             h_rayTo.push_back(5.0);
@@ -175,7 +178,7 @@ int main() {
     vector<int> h_triangles;
     vector<int> valid_outcome_idx;
     vector<float> valid_outcome;
-    readMeshData("cobra_wheel.obj", h_vertices, h_triangles);
+    readMeshData("lugged_wheel.obj", h_vertices, h_triangles);
 
     ObjectState objectState;
     for(int j = 0; j < 200; j++){
